@@ -1,0 +1,1371 @@
+---
+title: '**Movielens Recommendation System**'
+author: "Johannes Werner"
+date: "`r format(Sys.Date(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    df_print: kable
+    number_sections: true
+    toc: true
+    fig_caption: true
+  word_document:
+    toc: true
+  html_document: default
+subtitle: 'HarvardX Data Science Professional Certificate: PH125.9x Capstone 1'
+fontsize: 11pt
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{longtable}
+  - \usepackage{array}
+  - \usepackage{multirow}
+  - \usepackage{caption}
+  - \usepackage{float}
+  - \usepackage{enumitem}
+  - \usepackage[bottom]{footmisc}
+  - \setlength{\abovecaptionskip}{4pt}
+  - \setlength{\belowcaptionskip}{0pt}
+  - \setlist[itemize]{itemsep=0pt}
+  - \setlist[enumerate]{itemsep=0pt}
+include-before: '`\newpage{}`{=latex}'
+urlcolor: blue
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+# knitr global chunk options
+knitr::opts_chunk$set(
+fig.width = 4.5,
+fig.height = 3,
+fig.align = 'center',
+fig.pos = "H"
+)
+
+my_kable <- function(x, caption = NULL) {
+  knitr::kable(x, 
+               format = "latex",
+               booktabs = TRUE,
+               caption = caption,
+               linesep = "") %>%
+    kable_styling(
+      latex_options = c("scale_down", "hold_position"),
+      font_size = 9,
+      position = "center"
+    )
+}
+
+library(ggplot2)
+
+theme_set(
+  theme_minimal() +
+    theme(
+      plot.title = element_text(size = rel(0.9)),
+      axis.title = element_text(size = rel(0.8)),
+      axis.text = element_text(size = rel(0.7)),
+      legend.title = element_text(size = rel(0.8)),
+      plot.margin = unit(c(2,2,2,2), "mm"),
+      plot.caption = element_text(size = rel(0.6), hjust = 1)
+    )
+)
+```
+
+\newpage
+
+```{r data_preparation, eval=TRUE, include=FALSE, cache=TRUE}
+##########################################################
+# Create edx and final_holdout_test sets 
+##########################################################
+
+# Note: this process could take a couple of minutes
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+options(timeout = 120)
+
+dl <- "ml-10M100K.zip"
+if(!file.exists(dl))
+  download.file("https://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings_file <- "ml-10M100K/ratings.dat"
+if(!file.exists(ratings_file))
+  unzip(dl, ratings_file)
+
+movies_file <- "ml-10M100K/movies.dat"
+if(!file.exists(movies_file))
+  unzip(dl, movies_file)
+
+ratings <- as.data.frame(str_split(read_lines(ratings_file), fixed("::"), simplify = TRUE),
+                         stringsAsFactors = FALSE)
+colnames(ratings) <- c("userId", "movieId", "rating", "timestamp")
+ratings <- ratings %>%
+  mutate(userId = as.integer(userId),
+         movieId = as.integer(movieId),
+         rating = as.numeric(rating),
+         timestamp = as.integer(timestamp))
+
+movies <- as.data.frame(str_split(read_lines(movies_file), fixed("::"), simplify = TRUE),
+                        stringsAsFactors = FALSE)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- movies %>%
+  mutate(movieId = as.integer(movieId))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Final hold-out test set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding") # if using R 3.6 or later
+# set.seed(1) # if using R 3.5 or earlier
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in final hold-out test set are also in edx set
+final_holdout_test <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from final hold-out test set back into edx set
+removed <- anti_join(temp, final_holdout_test)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+```
+
+# Introduction
+
+In this project, a movie recommendation system is developed using the MovieLens dataset with machine learning techniques. The report describes the creation of the recommendation system at the example of the MovieLens 10M dataset [@movielens10m], with 10 million movie ratings.
+
+The MovieLens dataset is split into two parts: the training set (edx) and the final holdout test set (validation). The goal is to create an algorithm that predicts the ratings for movies with high accuracy with a root mean square error (RMSE) lower than 0.86490, tested on the validation set.
+
+The project is divided into the following steps:
+
+\begin{itemize}
+\item \textbf{Data exploration:} Analysis and visualization of the dataset to get an overview of the data and to see important patterns and behaviors.
+\item \textbf{Method development:} Implementation of various approaches and effects, starting with simple averages and progressing to more advanced techniques, described mathematically.
+\item \textbf{Model results:} Application of the methods on the data with their impact on the RMSE and evaluation.
+\end{itemize}
+
+Over the process, the edx dataset is used for training and testing. The validation set (final holdout set) is reserved for the final performance check of the completed algorithm.
+
+The sections in this report describe the methods used, the results obtained, and the learnings gained during the development of the recommendation system. The report concludes with a discussion of the limitations of the model and gives recommendations for future projects and their improvements.
+
+The report was created using R Markdown in RStudio including the use of the R programming language for statistical computing and data analysis.
+
+\newpage
+
+# Data Exploration
+
+In this section an overview over the edx dataset is made. In Table 1 and Table 2 the number of rows and the structure of the data in the first 10 rows can be seen.
+
+```{r number_rows, eval=TRUE, cache=TRUE, include=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+library(tibble)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(ggthemes)
+library(scales)
+library(knitr)
+library(kableExtra)
+
+
+# Set a seed for reproducibility
+set.seed(1)
+
+# Check the number of rows in the reduced dataset
+data.frame(Rows = nrow(edx)) %>%
+  my_kable(caption = "Number of rows in edx Dataset")
+```
+
+```{r first_rows, eval=TRUE, cache=TRUE, include=TRUE, echo=FALSE}
+# Show head of dataset edx (first 10 rows)
+head(edx, 10) %>%
+my_kable(caption = "First 10 Rows of edx Dataset")
+
+```
+
+
+## Ratings
+
+In the data, movie ratings are included.  Possible ratings were in the range between 0.5 and 5.  Hereby, whole numbers seem to be preferred.  The distribution of the number of ratings on the different rating values can be seen in Figure 1.  In Table 3, the top 10 films with the most ratings are listed.
+
+```{r distribution_ratings, eval=TRUE, cache=TRUE, include=TRUE, echo=FALSE, fig.cap="Distribution of film ratings"}
+# Plot distribution of film ratings in edx
+ggplot(edx, aes(x = rating)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +
+  scale_x_continuous(breaks = seq(min(edx$rating)-0.5, max(edx$rating), by = 0.5)) +
+  scale_y_continuous(breaks = seq(0, max(length(edx$rating)), by = 500000),labels = function(x) format(x, scientific = FALSE,big.mark=",")) +
+  labs(x = "Rating", y = "Number of ratings", caption = "Source: edx data")
+```
+
+```{r Top10, eval=TRUE, include=TRUE, echo=FALSE, cache=TRUE}
+library(dplyr)
+
+# Plot Top 10 Films with the most ratings in a table
+edx %>%
+  group_by(movieId, title) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  arrange(desc(count)) %>%
+  head(10) %>% my_kable(caption = "Top 10 Films with the most ratings")
+```
+
+\newpage
+
+The dataset includes ratings from 1995 to 2009. During that time, the number of ratings made changes. In Figure 2, the number of ratings are summed up per week and plotted by time. It can be seen that before 2000, the number of ratings varied a lot. After 2000, the number of ratings reached a certain level with some peaks, decreased again but stayed at a level of about 22,000 ratings per week till 2009. The peaks may possibly come from a blockbuster movie coming out at that time.
+
+```{r Ratings_over_time, eval=TRUE, include=TRUE, echo=FALSE, cache=TRUE, fig.cap="Number of ratings over time (weekly)"}
+# Convert timestamp to Date format for plotting
+edx$date <- as.Date(as.POSIXct(edx$timestamp, origin = "1970-01-01"))
+
+# Create a line plot showing the number of ratings per week
+ggplot(edx, aes(x = floor_date(as.Date(as.POSIXct(timestamp, origin = "1970-01-01")), "week"))) +
+  geom_line(stat = "count", color = "darkgreen") +
+  labs(x = "Year", 
+       y = "Number of ratings", 
+       caption = "Source: edx data") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  scale_y_continuous(trans = "sqrt", labels = function(x) format(x, scientific = FALSE,big.mark=","))
+```
+
+
+## Genre related observations
+
+Film genres are also included in the data.  In Figure 3 (left), there are the top 10 first named genres related to the specific movie and its rating.  So, these names and genres seem to be the most important in the dataset. In Figure 3 (right), the average rating per genre with the dot size representing the number of ratings can be seen.  There seems to be a bias per genre, as different genres tend to get higher ratings than others.  So, there seems to be a genre effect on the rating.  If this can be seen here, it is also likely that on a lower level, specific films also influence the average rating.
+
+```{r genre_plots, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.width=6.6, fig.height=3, fig.cap="Top 10 film genres (left) and average rating per genre (right)", warning=FALSE, message=FALSE}
+# genre_plots: Creating two side-by-side plots for top 10 film genres and average ratings per genre
+library(gridExtra)
+
+grid.arrange(
+  # Plot 1: Horizontal bar chart of top 10 film genres by count
+  ggplot(edx %>%
+    separate_rows(genres, sep = "\\|") %>%
+    count(genres, sort = TRUE) %>%
+    slice_head(n = 10),
+    aes(x = reorder(genres, n), y = n)) +
+    geom_col(fill = "orange", color = "black") +
+    coord_flip() +
+    scale_y_continuous(labels = function(x) format(x, scientific = FALSE, big.mark = ",")) +
+    labs(x = "Genre", y = "Number", caption = "Source: edx data"),
+  
+  # Plot 2: Scatter plot of average rating per genre with count-based sizing
+  ggplot(edx %>%
+    separate_rows(genres, sep = "\\|") %>%
+    group_by(genres) %>%
+    summarise(avg_rating = mean(rating), count = n()) %>%
+    filter(count > 1000) %>%
+    arrange(desc(avg_rating)),
+    aes(x = reorder(genres, avg_rating), y = avg_rating)) +
+    geom_point(aes(size = count), color = "black", fill = "purple", shape = 21, stroke = 0.5) +
+    coord_flip() +
+    labs(x = "Genre", y = "Average Rating", size = "Number of Ratings", caption = "Source: edx data") +
+    scale_size_continuous(labels = function(x) format(x, scientific = FALSE, big.mark = ",")) +
+    theme(
+        legend.position = c(0.975, 0.025),
+        legend.justification = c("right", "bottom"),
+        legend.box.just = "right",
+        legend.margin = margin(6, 6, 6, 6),
+        legend.text = element_text(size = 7),
+        legend.title = element_text(size = 7),
+        legend.key.size = unit(0.4, "lines"),
+        legend.background = element_rect(fill = "white", color = NA)
+    ),
+  # Arrange plots in 2 columns and set width
+  ncol = 2, 
+  widths = c(1, 1)
+)
+```
+
+
+## User related observations
+
+The next two diagrams in Figure 4 show the average rating vs. number of users, respectively, the average number of ratings per user.
+Most of the users have an average rating overall of 3.5 - 3.8. This seems to follow a Gaussian distribution. On the right, it can be seen that there are some "power users" (around 200 - 400) who have several thousand ratings. However, most of the users only made a small number of ratings.
+
+```{r user_prep, eval=TRUE, echo=FALSE, cache=TRUE, include=FALSE}
+# user_prep: Preparing data by extracting release year from movie titles
+edx$released <- str_extract(edx$title, "\\((\\d{4})\\)") %>% 
+                                  str_remove_all("[()]") %>% 
+                                  as.numeric()
+```
+
+```{r user_plots, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.width=6.6, fig.height=3, fig.cap="Average rating per user (left) and average number of ratings per user (right)"}
+# user_plots: Creating two side-by-side histograms for average rating per user and number of ratings per user
+library(gridExtra)
+
+grid.arrange(
+
+# Plot 1: Histogram of average rating per user
+edx %>% group_by(userId) %>%
+  summarise(ave_rating = sum(rating)/n()) %>%
+  ggplot(aes(ave_rating)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE,big.mark=",")) +
+  labs(x = "Average rating", y = "Number of users", caption = "Source: edx data"),
+
+# Plot 2: Histogram of number of ratings per user
+edx %>% 
+  count(userId) %>% 
+  ggplot(aes(n)) + 
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  scale_x_log10(labels = function(x) format(x, scientific = FALSE,big.mark=",")) +
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE,big.mark=",")) +
+  labs(x = "Users", y = "Number of ratings", caption = "Source: edx data"),
+  
+  # Arrange plots in 2 columns and set width  
+  ncol = 2, 
+  widths = c(1, 1)
+)
+```
+
+
+## Time dependent observations
+
+In the dataset, there are time dimensions that should be mentioned. The first one is the time of rating. Possibly, in some time period or time of the year, the average ratings are different. So, there could possibly be a time effect on the rating value. 
+The second time dimension is the release year of the specific movie. This value can be extracted from the title in the dataset. If the average rating per release year of the film is plotted in a diagram, it can be seen that older films tend to have a higher rating than newer films. 
+So, both effects could play a role in developing the algorithm to predict the ratings. The two diagrams can be seen in Figure 5.
+
+```{r time_dependent_plots, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.width=6.6, fig.height=3, fig.cap="Date vs. weekly averaged rating (left) and release year vs. averaged rating (right)", warning=FALSE, message=FALSE}
+# time_dependent_plots: Plot weekly averaged rating vs. date and averaged rating vs. release year
+library(gridExtra)
+
+grid.arrange(
+  # Scatter plot of weekly averaged rating over time
+  edx %>% 
+    ggplot(aes(date, rating)) +
+    geom_point(data = edx %>% 
+               mutate(date = round_date(date, unit = "week")) %>%
+               group_by(date) %>%
+               summarize(rating = mean(rating)),
+             aes(x = date, y = rating), 
+             alpha = 0.5, color = "black", size = 0.7) +
+    labs(x = "Date", y = "Rating", caption = "Source: edx data") +
+    coord_cartesian(ylim = c(3, 4)),
+  
+  # Scatter plot of averaged rating by release year
+  edx %>%
+    group_by(released) %>%
+    summarize(rating = mean(rating)) %>%
+    ggplot(aes(released, rating)) +
+    geom_point(size = 0.7) +
+    labs(x = "Released", y = "Rating", caption = "Source: edx data"),
+  
+  ncol = 2, 
+  widths = c(1, 1)
+)
+```
+
+\newpage
+
+# Methods
+
+In this chapter the mathematical methods used for evaluating and for building up the prediction algorithm are described step by step. It starts with the performance metric and the average rating and adds in every step another effect to improve the model.
+
+## Performance metric: RMSE
+
+The model performance is evaluated by the "Root Mean Square Error" (RMSE), which was also used in the Netflix challenge [@koren_matrix_2009], where a similar problem needed to be evaluated. The RMSE is a measure of the average deviation between predicted and actual ratings.
+
+The RMSE is defined by the following formula [@irizarry_introduction_2019, Ch. 33.7.3]:
+
+$$
+\text{RMSE} = \sqrt{\frac{1}{N} \sum_{u,i} \left( \hat{y}_{u,i} - y_{u,i} \right)^2}
+$$ Where:
+
+\begin{itemize}
+ \item $y_{u,i}$ is the actual rating for movie $i$ by user $u$
+ \item $\hat{y}_{u,i}$ is the prediction
+ \item $N$ is the total number of user-movie combinations
+\end{itemize}
+
+A lower RMSE indicates better performance. The objective of this project is to achieve an RMSE below 0.86490.
+
+## Model structure
+
+The predition model is constructed step by step, starting with the most basic form and incrementally adding additional effects. This approach allows to understand the change coming from each factor and to evaluate the contribution to the overall prediction accuracy.
+
+\vspace{10pt}
+\textbf{\large Basic model}
+\vspace{1pt}
+
+The simple model assumes that all ratings are scattered around a global mean [@irizarry_introduction_2019, Ch. 33.7.4]:
+$$Y_{u,i} = \mu + \varepsilon_{u,i}$$ 
+Where:
+\begin{itemize}
+ \item $\mu$ is the overall average rating across all movies and users
+ \item $\varepsilon_{u,i}$ is the error term, representing the deviation from the mean
+\end{itemize}
+
+\vspace{10pt}
+\textbf{\large Movie effect model}
+\vspace{1pt}
+
+Then, a movie-specific effect is added to account for the fact that some movies are rated higher or lower than others [@irizarry_introduction_2019, Ch. 33.7.5]:
+$$Y_{u,i} = \mu + b_i + \varepsilon_{u,i}$$ 
+Where $b_i$ represents the movie effect for movie $i$. This takes into account how much a movie's average rating deviates from the global mean.
+
+\vspace{10pt}
+\textbf{\large User effect model}
+\vspace{1pt}
+
+Next, a user effect to account for individual user rating biases is added [@irizarry_introduction_2019, Ch. 33.7.6]:
+$$Y_{u,i} = \mu + b_i + b_u + \varepsilon_{u,i}$$ 
+Where $b_u$ represents the user effect for user $u$. This takes into account how much a user's average rating deviates from the global mean.
+
+\vspace{10pt}
+\textbf{\large Release year effect model}
+\vspace{1pt}
+
+To account for potential trends or biases related to a movie's release year, a release year effect is introduced: $$Y_{u,i} = \mu + b_i + b_u + b_r + \varepsilon_{u,i}$$ 
+Where $b_r$ represents the release year effect for the release year $r$ in which the movie was released.
+
+\vspace{10pt}
+\textbf{\large Genre effect model}
+\vspace{1pt}
+
+Finally, a genre effect is implemented to capture rating patterns coming with different movie genres:
+$$Y_{u,i} = \mu + b_i + b_u + b_r + b_g + \varepsilon_{u,i}$$ 
+Where $b_g$ represents the genre effect for genre $g$.
+
+## Time adjustment
+
+Temporal changes in ratings are implemented by a time adjustment using weekly averaged ratings and generalized additive model (GAM) curves [@clark_introduction_gam]. This allows to capture and correct trends in ratings over time.
+
+This is done by the following steps:
+
+\begin{enumerate}
+\item \textbf{Calculate the weekly averaged ratings.}
+\item \textbf{Fit a GAM} curve to these ratings. This creates a smooth curve that represents the trend of rating with a small amount of data points.
+\item \textbf{Substract the overall mean rating} from the fit curve to get the effect relative to the mean.
+\item \textbf{Use the centered GAM curve} to adjust the individual effects.
+\end{enumerate}
+
+Mathematically, for the movie effect $b_i$, this can be represented as:
+$$b_i^*(t) = b_i + (f_i(t) - \mu)$$ 
+Where:
+\begin{itemize}
+ \item $b_i^*(t)$ is the time-adjusted movie effect at time $t$
+ \item $b_i$ is the original movie effect
+ \item $f_i(t)$ is the fitted GAM function for movie $i$ at time $t$
+ \item $\mu$ is the overall mean rating
+\end{itemize}
+
+Similar adjustments are made for user effects ($b_u$) and release year effects ($b_y$).
+
+This approach allows to capture and correct temporal trends in ratings while the structure in the effect stays the same. The time-adjusted effects ($b_i^*$, $b_u^*$, and $b_y^*$) are then used the following steps. 
+
+\textbf{Note:} Not all effects are time-adjusted. The reason for that is explained in 4.2.
+
+## Range correction
+
+After applying time-adjustments a range correction can be performed. This makes sure that the predicted rating lie within the valid rating range (0.5 to 5). Any predictions outside of that range are adjusted to the nearest valid rating.
+
+## Regularization
+
+For prevention of overfitting, especially for movies or users with a small amount of ratings, regularization is applied. This penalizes large effect values, by shifting them towards 0 (deviation) [@regularization].
+
+Therefore, the equation that includes a penalty term is minimized [cf. @irizarry_introduction_2019, Ch. 33.9.2]:
+
+$$\sum_{u,i} (y_{u,i} - \mu - b_i)^2 + \lambda \sum_i b_i^2$$
+
+The first term is the sum of squared errors; the second term penalizes large values of $b_i$. The parameter $\lambda$ controls the strength of the regularization.
+
+The values of $b_i$ that minimize this equation are [@irizarry_introduction_2019, Ch. 33.9.2]:
+
+$$\hat{b}_i(\lambda) = \frac{1}{\lambda + n_i} \sum_{u=1}^{n_i} (Y_{u,i} - \hat{\mu})$$
+
+Where $n_i$ is the number of ratings for movie $i$.
+
+This regularization approach is applied to all aforementioned effects (movie, user, release year, and genre).
+
+## Regularization of all effects
+
+To apply regularization to all effects together, an expanded equation that includes penalty terms for each effect is constructed:
+
+$$\sum_{u,i} (y_{u,i} - \mu - b_i^* - b_u^* - b_r^* - b_g)^2 + \lambda(\sum_i (b_i^*)^2 + \sum_u (b_u^*)^2 + \sum_y (b_y^*)^2 + \sum_g b_g^2)$$
+
+Where $\lambda$ is the regularization parameter applied to all effects. This comprehensive regularization balances the influence of each effect and prevents any single factor from dominating the predictions.
+
+By applying this methodology, a robust model that accurately predicts movie ratings while considering various influencing factors, accounting for temporal changes, and addressing potential overfitting issues is created. The incremental approach allows one to understand the contribution of each effect, while the time-adjustment and regularization help to improve the model's performance.
+
+## Final model
+
+When the model is created and tuned with the train and test set out of the edx data, the RMSE is calculated by predicting the ratings in the final_holdout_test dataset with all the shown methods. This step makes sure that the model's performance is evaluated on "unknown" data, and then provides a realistic measure of its predictive accuracy.
+
+\newpage
+
+# Results
+
+In this section, the methods presented in the chapter before are applied to the data step by step. After implementing each method, the RMSE is checked as if it decreases.
+
+The data used for this is only the edx dataset. The final holdout test set is just used at the end to check the model performance and if the target is reached.
+
+At first, the test set and the train set need to be prepared. Therefore, the data is sampled. 90% for the train set and 10% for the test set.
+
+```{r Preparation_test_set_train_set_rmse_result_avg, eval=TRUE, echo=FALSE, cache=TRUE, include=FALSE}
+# Preparation_test_set, train_set, rmse_result_avg: Prepare data, split into train/test sets, and calculate baseline RMSE
+# install packages if required
+if(!require(pdflatex)) install.packages("pdflatex")
+if(!require(tinytex)) install.packages("tinytex")
+if(!require(knitr)) install.packages("knitr")
+if(!require(rmarkdown)) install.packages("rmarkdown")
+
+# load libraries
+library(dslabs)
+library(tidyverse)
+library(caret)
+library(dplyr)
+library(gam)
+library(mgcv)
+library(tibble)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(ggthemes)
+library(scales)
+library(tinytex)
+
+# Set seed for reproducibility
+set.seed(1)
+
+# Add date and release year to edx dataset
+edx$date <- as.Date(as.POSIXct(edx$timestamp, origin = "1970-01-01"))
+edx <- edx %>%
+  mutate(released = str_extract(title, "\\((\\d{4})\\)") %>% 
+           str_remove_all("[()]") %>% 
+           as.numeric())
+
+# Split data into training and test sets (90% train, 10% test)
+test_index <- createDataPartition(y = edx$rating, times = 1,
+                                  p = 0.1, list = FALSE)
+train_set <- edx[-test_index,]
+test_set <- edx[test_index,]
+test_set <- test_set %>% 
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId")
+
+# Define RMSE function
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+# Calculate base RMSE using just the average rating
+mu <- mean(train_set$rating)
+mu_rmse <- RMSE(test_set$rating, mu)
+rmse_results <- data_frame(Method = "Just the average", RMSE = mu_rmse)
+```
+
+The most trivial model is using just the average of the ratings. The RMSE result of this can be seen in the following table.
+
+```{r rmse_avg, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_avg: Display RMSE result in a table
+rmse_results %>% knitr::kable()
+```
+
+## Applying the effects
+\textbf{\large Movie effect}
+\vspace{1pt}
+
+The first additional effect applied to the model is the movie effect. This is done by grouping by movieID and summarized by the mean of rating per movie relative to the average. This effect is named $b_i$
+The movie effect on the result is plotted in Figure 6 with the average deviation from the mean relative to the number of movies for which the specific deviation is valid.
+
+The RMSE change can be seen in the table below the figure.
+
+```{r movie_dev, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="Movie effect"}
+# movie_dev: Plot histogram of movie effect (average deviation from mean rating)
+# Calculate movie-specific average deviation from overall mean
+movie_avg <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(b_i = mean(rating - mu))
+
+# Plot distribution of movie deviations
+movie_avg %>% group_by(movieId) %>%
+  summarise(ave_deviation = sum(b_i)/n()) %>%
+  ggplot(aes(ave_deviation)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  labs(x = "Average deviation", y = "Number of movies", caption = "Source: train data")
+```
+
+```{r rmse_movie, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_movie: Calculate and display RMSE for movie effect model
+# Predict ratings using movie-specific deviations
+predicted_ratings <- mu + test_set %>%
+  left_join(movie_avg, by='movieId') %>%
+  pull(b_i)
+
+# Compute RMSE and append to results table
+model_1_rmse <- RMSE(predicted_ratings, test_set$rating)
+suppressWarnings({
+  rmse_results <- bind_rows(rmse_results,
+                            tibble(Method="Movie effect model",
+                                   RMSE = model_1_rmse ))
+})
+
+# Display updated RMSE table
+rmse_results %>% knitr::kable()
+```
+\textbf{\large User effect}
+\vspace{1pt}
+
+A similar approach is done for the user effect. The data is grouped by userId and summarized by the mean of rating per user relative to the average and minus $b_i$. This effect is named as $b_u$
+The user effect on the result is plotted in Figure 7 with the average deviation from the mean relative to the number of users for which the specific deviation is valid.
+
+The RMSE change can be seen in the table below the figure.
+
+```{r user_dev, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="User effect"}
+# user_dev: Plot histogram of user effect (average deviation from mean rating)
+# Calculate user-specific average deviation after movie effect
+user_avg <- train_set %>% 
+  left_join(movie_avg, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+
+# Visualize distribution of user deviations
+user_avg %>% group_by(userId) %>%
+  summarise(ave_deviation = sum(b_u)/n()) %>%
+  ggplot(aes(ave_deviation)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  scale_x_continuous(breaks = -3:2) +
+  labs(x = "Average deviation", y = "Number of users", caption = "Source: train data")
+```
+
+```{r rmse_user, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_user: Calculate and display RMSE for movie + user effect model
+# Predict ratings using movie and user effects
+predicted_ratings <- test_set %>% 
+  left_join(movie_avg, by='movieId') %>%
+  left_join(user_avg, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  pull(pred)
+
+# Compute RMSE and append to results table
+suppressWarnings({
+model_2_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method="Movie + User effect model",  
+                                     RMSE = model_2_rmse ))
+})
+# Display updated RMSE table
+rmse_results %>% knitr::kable()
+```
+
+\newpage
+
+\textbf{\large Release year effect}
+\vspace{1pt}
+
+For the release year effect, the data is grouped by "released", which is the Release year of the movie that was already extracted before for data exploration. The ratings are summarized by the mean of rating per release relative to the average and minus $b_i$ and $b_u$. This effect is named as $b_r$.
+The average ratings per release year are again plotted in Figure 8 (left) but with a generalized additive model (GAM) smoothed curve for a better presentation of how, in general, the movie ratings by release year change.
+The release year effect on the result is plotted in Figure 8 (right) with the average deviation from the mean relative to the number of years for which the specific deviation is valid.
+
+The RMSE change can be seen in the table below the figure.
+
+```{r release_year_prep, eval=TRUE, echo=FALSE, cache=TRUE, include=FALSE}
+# release_year_prep: Prepare release year effect data
+# Calculate release year-specific deviation after movie and user effects
+ released_avg <- train_set %>% 
+  left_join(movie_avg, by='movieId') %>%
+  left_join(user_avg, by='userId') %>%
+  group_by(released) %>%
+  summarize(b_r = mean(rating - mu - b_i - b_u))
+```
+
+```{r release_year_plots, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.width=6.6, fig.height=3, fig.cap="Release year - Average rating (left) and Release year effect (right)", warning=FALSE, message=FALSE}
+# release_year_plots: Plot release year vs. average rating and release year effect distribution
+library(gridExtra)
+
+grid.arrange(
+  # Scatter plot with smooth curve of average rating by release year
+  edx %>%
+    group_by(released) %>%
+    summarize(rating = mean(rating)) %>%
+    ggplot(aes(released, rating)) +
+    geom_point(size = 0.7) +
+    geom_smooth(method="gam", formula = y ~ s(x, bs = "cs"), color = "darkgreen", size = 0.7) +
+    labs(x = "Released", y = "Rating", caption = "Source: edx data"),
+
+# Histogram of release year effect deviations
+released_avg %>% group_by(released) %>%
+  summarise(ave_deviation = sum(b_r)/n()) %>%
+  ggplot(aes(ave_deviation)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  labs(x = "Average deviation", y = "Number of years", caption = "Source: train data"),
+  
+  ncol = 2, 
+  widths = c(1, 1)
+)
+```
+
+```{r rmse_release_year, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_release_year: Calculate and display RMSE for movie + user + release year effect model
+# Join test set with movie, user, and release year averages
+predicted_ratings <- test_set %>% 
+  left_join(movie_avg, by='movieId') %>%
+  left_join(user_avg, by='userId') %>%
+  left_join(released_avg, by='released') %>%
+  mutate(pred = mu + b_i + b_u + b_r) %>%
+  pull(pred)
+
+# Compute RMSE and append to results table
+model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method="Movie + User effect Model + Release year effect",  
+                                     RMSE = model_3_rmse ))
+
+# Display updated RMSE table
+rmse_results %>% knitr::kable()
+```
+
+\textbf{\large Genre effect}
+\vspace{1pt}
+
+Next is the genre effect. The data is grouped by genres and summarized by the mean of rating per genre relative to the average and minus $b_i$, $b_u$, and $b_r$. This effect is named as $b_g$
+The genre effect on the result is plotted in Figure 9 with the average deviation from the mean relative to the number of genre combinations for which the specific deviation is valid. Here, every single genre combination is considered, not just the main genres.
+
+The RMSE change can be seen in the table below the figure.
+
+```{r genre_dev, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="Genre effect"}
+# genre_dev: Calculate and visualize genre effect on movie ratings
+# Calculate genre effect by subtracting movie, user, and release year effects 
+genre_avg <- train_set %>% 
+  left_join(movie_avg, by='movieId') %>%
+  left_join(user_avg, by='userId') %>%
+  left_join(released_avg, by='released') %>%
+  group_by(genres) %>%
+  summarize(b_g = mean(rating - mu - b_i - b_u - b_r)) 
+
+# Plot histogram of genre effect deviations
+genre_avg %>% group_by(genres) %>%
+  summarise(ave_deviation = sum(b_g)/n()) %>%
+  ggplot(aes(ave_deviation)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  labs(x = "Average deviation", y = "Genre", caption = "Source: train data")
+```
+
+```{r rmse_genre, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_genre: Calculate and display RMSE for movie + user + release year + genre effect model
+# Join test set with movie, user, release year, and genre averages
+predicted_ratings <- test_set %>% 
+  left_join(movie_avg, by='movieId') %>%
+  left_join(user_avg, by='userId') %>%
+  left_join(released_avg, by='released') %>%
+  left_join(genre_avg, by='genres') %>%
+  # Calculate predicted ratings by adding movie, user, release year, and genre effects to the overall mean
+  mutate(pred = mu + b_i + b_u + b_r + b_g) %>%
+  pull(pred)
+model_4_rmse <- RMSE(predicted_ratings, test_set$rating)
+
+# Compute RMSE and append to results table
+suppressWarnings({
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method="Movie + User + Release year + Genre effect",  
+                                     RMSE = model_4_rmse ))
+})
+
+# Display updated RMSE table
+rmse_results %>% knitr::kable()
+```
+
+## Time of rating
+
+The next effect for implementation is the time of rating.
+Therefore, due to having around 8.1 million ratings in the train set, a fit curve was created. For data reduction purposes, week numbers were implemented in the data, and then the average rating per week was calculated. Again, a generalized additive model (GAM) was used to create a smooth curve for the data. The weekly averaged data points and the fit curve can be seen in Figure 10 (compare with Figure 5).
+
+
+```{r timeofrating_dev, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="Fitted GAM curve with weekly averaged data points"}
+# timeofrating_dev: Analyze and visualize the effect of time on movie ratings
+# Add week number to train and test sets
+train_set <- train_set %>% mutate(weekNumber = as.integer(difftime(date, min(date), units = "weeks")) + 1)
+
+test_set <- test_set %>% mutate(weekNumber = as.integer(difftime(date, min(date), units = "weeks")) + 1)
+
+# Fit a smooth curve to the ratings as a function of time
+fit <- gam(rating ~ s(weekNumber, bs = "cs"),
+           family = gaussian(), data = train_set)
+
+# Evaluate the fitted curve for each week number
+fit_curve <- data.frame(weekNumber = seq(1, max(train_set$weekNumber), length.out = max(train_set$weekNumber))) %>%
+  mutate(fit = predict.gam(fit, newdata = .) - mu)
+
+# Plot the fitted curve with weekly averaged data points
+fit_curve %>% 
+  left_join(
+    train_set %>% 
+      group_by(weekNumber) %>% 
+      summarize(date = min(date)),
+    by = "weekNumber"
+  ) %>%
+  filter(!is.na(date)) %>%
+  ggplot(aes(date, fit)) +
+  geom_point(data = train_set %>% 
+               mutate(date = round_date(date, unit = "week")) %>%
+               group_by(date) %>%
+               summarize(rating = mean(rating) - mu),
+             aes(x = date, y = rating), 
+             alpha = 0.5, color = "black", size = 0.7) +
+  geom_line(color = "darkgreen", linewidth = 1, alpha = 1) +
+  labs(x = "Date", y = "Rating (centered)", caption = "Source: train data") +
+  coord_cartesian(ylim = c(-0.5, 0.5))
+```
+
+After that, it was possible to remove the "time of rating" effect from the other effects (movie, user, release year, genre). The corrected effect deviations can be seen in Figure 11 and are designated as "time adjusted".
+
+```{r timecorrected_devs_prep, eval=TRUE, echo=FALSE, cache=TRUE, include=FALSE}
+# timecorrected_devs_prep: Prepare time-corrected effects for movie ratings
+# 1. Remove time effect from the ratings
+train_set_time_adjusted <- train_set %>%
+  mutate(time_effect = predict.gam(fit, newdata = .),
+         rating_time_adjusted = rating - time_effect + mu)
+
+# 2. Recalculate movie effects with time-adjusted ratings
+movie_avg_time <- train_set_time_adjusted %>% 
+  group_by(movieId) %>% 
+  summarize(b_i_time = mean(rating_time_adjusted - mu))
+
+# 3. Recalculate user effects with time-adjusted ratings
+user_avg_time <- train_set_time_adjusted %>% 
+  left_join(movie_avg_time, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u_time = mean(rating_time_adjusted - mu - b_i_time))
+
+# 4. Recalculate release year effects with time-adjusted ratings
+released_avg_time <- train_set_time_adjusted %>% 
+  left_join(movie_avg_time, by='movieId') %>%
+  left_join(user_avg_time, by='userId') %>%
+  group_by(released) %>%
+  summarize(b_r_time = mean(rating_time_adjusted - mu - b_i_time - b_u_time))
+
+# 5. Recalculate genre effects with time-adjusted ratings
+genre_avg_time <- train_set_time_adjusted %>% 
+  left_join(movie_avg_time, by='movieId') %>%
+  left_join(user_avg_time, by='userId') %>%
+  left_join(released_avg_time, by='released') %>%
+  group_by(genres) %>%
+  summarize(b_g_time = mean(rating_time_adjusted - mu - b_i_time - b_u_time - - b_r_time))
+```
+
+```{r timecorrected_devs, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="All effects time adjusted", out.width="100%", fig.width=12, fig.height=6, warning=FALSE, message=FALSE}
+# timecorrected_devs: Visualize time-adjusted effects on movie ratings
+if(!require(gridExtra)) install.packages("gridExtra")
+library(gridExtra)
+# Arrange the plots in a 2x2 grid
+grid.arrange(
+# Visualize time-adjusted movie effects
+movie_avg_time %>% 
+  ggplot(aes(b_i_time)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  labs(x = "Average deviation (time-adjusted)", y = "Number of movies", 
+       title = "Movie effect (time-adjusted)",
+       caption = "Source: train data"),
+
+# Visualize time-adjusted user effects
+user_avg_time %>% 
+  ggplot(aes(b_u_time)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  labs(x = "Average deviation (time-adjusted)", y = "Number of users", 
+       title = "User effect (time-adjusted)",
+       caption = "Source: train data"),
+
+# Visualize time-adjusted release year effects
+released_avg_time %>% 
+  ggplot(aes(b_r_time)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  labs(x = "Average deviation (time-adjusted)", y = "Number of years", 
+       title = "Release year effect (time-adjusted)",
+       caption = "Source: train data"),
+
+# Visualize time-adjusted genre effects
+genre_avg_time %>% 
+  ggplot(aes(b_g_time)) +
+  geom_histogram(bins=30, fill = "skyblue", color = "black") +
+  labs(x = "Average deviation (time-adjusted)", y = "Genre", 
+       title = "Genre effect (time-adjusted)",
+       caption = "Source: train data"),
+  ncol = 2
+)
+```
+
+During RMSE test of the time-adjusted models, it could be found out the time adjustment leads to better RMSE when applied to the movie, user, and release year effect. If also applied to genre effect, it is not beneficial for RMSE. So, for the following RMSE calculation and further calculations, the genre effect is not time-adjusted. The RMSE reduction for this is very small but nevertheless stays in the model in the rest of this project.
+
+The RMSE change can be seen in the table below.
+
+Remark: At the beginning of the calculations, a seed value of 1 is defined to get repeatable results. Changing this value results in different train and test sets and could possibly lead to an RMSE increase when adding the time adjustment.
+
+```{r rmse_time_adjusted, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_time_adjusted: Calculate and display RMSE for time-adjusted model with movie, user, release year, and genre effects
+# 6. Calculate predicted ratings with time-adjusted effects
+predicted_ratings_time <- test_set %>% 
+  mutate(time_effect = predict.gam(fit, newdata = .) - mu) %>%
+  left_join(movie_avg_time, by='movieId') %>%
+  left_join(user_avg_time, by='userId') %>%
+  left_join(released_avg_time, by='released') %>%
+  left_join(genre_avg, by='genres') %>%
+  mutate(pred = mu + b_i_time + b_u_time + b_r_time + b_g + time_effect) %>%
+  pull(pred)
+
+# 7. Evaluate RMSE for the time-adjusted model
+model_time_rmse <- RMSE(predicted_ratings_time, test_set$rating)
+
+# Append the new RMSE result to the existing results dataframe
+suppressWarnings({
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method="Time-adjusted (Movie, User, Release year) + Genre effect",  
+                                     RMSE = model_time_rmse ))
+})
+
+# Display the updated RMSE table
+rmse_results %>% knitr::kable()
+```
+
+In Figure 12, the individual time influence on the different effects can be seen. For movie, user, and release year effects, there are clear deviations in when the rating was done. Also, the genre has some effect on it, but it is not uniform over the genres. This could explain why there is an RMSE improvement only for movie, user, and release year effects and not for genre effect because there is no clear direction for all genres. 
+Decreasing RMSE by time adjustment for genre effect could possibly be realized by time adjustment individually per genre. This was not done in this project.
+
+```{r effects_over_time, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="Time vs. all effects (monthly averaged)", out.width="100%", fig.width=12, fig.height=6, warning=FALSE, message=FALSE}
+# effects_over_time: Visualize how different effects evolve over time
+if(!require(gridExtra)) install.packages("gridExtra")
+library(gridExtra)
+
+# Arrange the plots in a 2x2 grid
+grid.arrange(
+# Visualize time vs. movie effect
+train_set %>%
+  filter(date >= as.Date("1996-01-01")) %>%
+  left_join(movie_avg, by = "movieId") %>%
+  mutate(month = floor_date(date, "month")) %>%  # Aggregiere nach Monat
+  group_by(movieId, month) %>%                  # Gruppiere nach Film und Monat
+  summarize(avg_rating = mean(rating - mu), .groups = "drop") %>%  # Berechne Durchschnitt pro Monat
+  ggplot(aes(month, avg_rating)) +
+  geom_smooth(method = "gam", se = FALSE, color = "darkgreen") +  # Glättungseffekt
+  labs(title = "Time vs. Movie effect (monthly averaged)",
+       x = "Date", y = "Averaged deviation from mean", caption = "Source: train data") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y"),
+
+# Visualize time vs. user effect
+train_set %>%
+  filter(date >= as.Date("1996-01-01")) %>%
+  left_join(user_avg, by = "userId") %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(userId, month) %>%
+  summarize(avg_rating = mean(rating - mu), .groups = "drop") %>%
+  ggplot(aes(month, avg_rating)) +
+  geom_smooth(method = "gam", se = FALSE, color = "#5593ff") +
+  labs(title = "Time vs. User effect (monthly averaged)",
+       x = "Date", y = "Averaged deviation from mean", caption = "Source: train data") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y"),
+
+# Visualize time vs. release year effect
+train_set %>%
+  filter(date >= as.Date("1996-01-01")) %>%
+  left_join(released_avg, by = "released") %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(released, month) %>%
+  summarize(avg_rating = mean(rating - mu), .groups = "drop") %>%
+  ggplot(aes(month, avg_rating)) +
+  geom_smooth(method = "gam", se = FALSE, color = "purple") +
+  labs(title = "Time vs. Release year effect (monthly averaged)",
+       x = "Date", y = "Averaged deviation from mean", caption = "Source: train data") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y"),
+
+
+# Visualize time vs. genre effect
+train_set %>%
+  filter(date >= as.Date("1996-01-01")) %>%
+  mutate(main_genre = str_extract(genres, "^[^|]+")) %>%  # Extract only the first genre
+  group_by(main_genre) %>%
+  mutate(total_ratings = n()) %>%  # Count the number of ratings per genre
+  ungroup() %>%
+  filter(main_genre %in% (train_set %>%  # Filter for the top 10 genres
+                           mutate(main_genre = str_extract(genres, "^[^|]+")) %>%
+                           group_by(main_genre) %>%
+                           summarise(n = n(), .groups = "drop") %>%
+                           arrange(desc(n)) %>%
+                           slice_head(n = 10) %>%
+                           pull(main_genre))) %>%
+  left_join(genre_avg, by = "genres") %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(main_genre, month) %>%
+  summarize(avg_rating = mean(rating - mu), .groups = "drop") %>%
+  ggplot(aes(month, avg_rating, color = main_genre)) +
+  geom_smooth(method = "gam", se = FALSE) +
+  labs(title = "Time vs. Main Genre Effects (Monthly Averaged)",
+       x = "Date", y = "Averaged Deviation from Mean", caption = "Source: train data", color = NULL) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  ylim(-0.7, 0.7),
+
+  ncol = 2
+)
+```
+
+## Range correction
+
+The next topic to take a further look at is range correction. Figure 13 shows the distribution of the predicted ratings. It can be seen that a certain number of values lie out of range (lower than 0.5 = 107, higher than 5 = 2152).
+
+```{r ratings_distribution, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="Distribution of the predicted ratings"}
+# ratings_distribution: Visualize the distribution of predicted ratings
+# Count values out of range [0.5, 5.0]
+greater_than_5 <- sum(predicted_ratings_time > 5)
+less_than_0_5 <- sum(predicted_ratings_time < 0.5)
+
+# Create the plot
+ggplot(data.frame(rating = predicted_ratings_time), aes(x = rating)) +
+  geom_histogram(binwidth = 0.25, boundary = 0, color = "black", fill = "skyblue") +
+  geom_vline(xintercept = c(0.5, 5.0), color = "red", linetype = "dashed") +
+  scale_x_continuous(breaks = seq(0, 6, by = 0.5)) +
+  scale_y_sqrt(labels = label_comma()) +
+  labs(x = "Rating",
+       y = "Number of ratings", 
+       caption = "Source: train data",
+       subtitle = sprintf("Values < 0.5: %d, Values > 5: %d", less_than_0_5, greater_than_5)) +
+  theme(plot.subtitle = element_text(size = rel(0.8)))
+```
+
+Due to that, in the edx dataset, it can be seen that values below 0.5 and higher than 5 are not valid; for further decrease of RMSE, the prediction out of range can be corrected either to 0.5 or 5. 
+The outcome (RMSE decrease) can be seen in the following table ("corr").
+
+```{r rmse_corr, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_corr: Correct out-of-range predicted ratings and evaluate RMSE
+# Correct values out of range [0.5, 5.0]
+predicted_ratings_time <- pmin(pmax(predicted_ratings_time, 0.5), 5.0)
+
+# Evaluate RMSE for the corrected model
+model_time_rmse_corr <- RMSE(predicted_ratings_time, test_set$rating)
+
+# Append the new RMSE result to the existing results dataframe
+suppressWarnings({
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method="Time-adjusted (Movie, User, Release year) + Genre effect + corr",  
+                                     RMSE = model_time_rmse_corr ))
+})
+
+# Display the updated RMSE table
+rmse_results %>% knitr::kable()
+```
+
+## Regularization
+
+In the following, regularization for penalizing large effect values is applied to all effects to prevent overfitting.
+
+\begin{enumerate}
+\item without the time adjusted model 
+\item with the time adjusted model 
+\end{enumerate}
+
+The lambda values are a variable, and a range between 4.2 and 5.0 in 0.1 steps is applied in a loop. With this procedure, the best value of lambda can be found, and it can also be seen if, after regularization, the time adjustment still leads to a better RMSE.
+
+```{r regularization_prep, eval=TRUE, echo=FALSE, cache=TRUE, include=FALSE}
+# regularization_prep: Prepare regularization for movie, user, release year, and genre effects
+# Define a sequence of lambda values for regularization
+lambdas <- seq(4.2, 5.0, 0.1)
+
+# Calculate RMSEs for different lambda values without time adjustment
+rmses <- sapply(lambdas, function(l){
+  
+  # Regularize movie effects
+  movie_avg_reg <- train_set %>%
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating - mu)/(n()+l))
+  
+  # Regularize user effects
+  user_avg_reg <- train_set %>%
+    left_join(movie_avg_reg, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - b_i - mu)/(n()+l))
+  
+  # Regularize release year effects
+  released_avg_reg <- train_set %>%
+    left_join(movie_avg_reg, by='movieId') %>%
+    left_join(user_avg_reg, by='userId') %>%
+    group_by(released) %>%
+    summarize(b_r = sum(rating - mu - b_i - b_u)/(n()+l))
+  
+  # Regularize genre effects
+  genre_avg_reg <- train_set %>%
+    left_join(movie_avg_reg, by='movieId') %>%
+    left_join(user_avg_reg, by='userId') %>%
+    left_join(released_avg_reg, by='released') %>%
+    group_by(genres) %>%
+    summarize(b_g = sum(rating - mu - b_i - b_u - b_r)/(n()+l))
+  
+  # Predict ratings with regularized effects
+  predicted_ratings <-
+    test_set %>%
+    left_join(movie_avg_reg, by = "movieId") %>%
+    left_join(user_avg_reg, by = "userId") %>%
+    left_join(released_avg_reg, by = "released") %>%
+    left_join(genre_avg_reg, by = "genres") %>%
+    mutate(pred = mu + b_i + b_u + b_r + b_g) %>%
+    pull(pred)
+  return(RMSE(predicted_ratings, test_set$rating))
+})
+
+# Calculate RMSEs for different lambda values with time adjustment
+rmses_time <- sapply(lambdas, function(l){
+  
+  # Regularize movie effects with time-adjusted ratings
+  movie_avg_time_reg <- train_set_time_adjusted %>%
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating_time_adjusted - mu)/(n()+l))
+  
+  # Regularize user effects with time-adjusted ratings
+  user_avg_time_reg <- train_set_time_adjusted%>%
+    left_join(movie_avg_time_reg, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating_time_adjusted - b_i - mu)/(n()+l))
+  
+  # Regularize release year effects with time-adjusted ratings
+  released_avg_time_reg <- train_set_time_adjusted%>%
+    left_join(movie_avg_time_reg, by='movieId') %>%
+    left_join(user_avg_time_reg, by='userId') %>%
+    group_by(released) %>%
+    summarize(b_r = sum(rating_time_adjusted - mu - b_i - b_u)/(n()+l))
+  
+  # Regularize genre effects (not time-adjusted)
+  genre_avg_reg <- train_set%>%
+    left_join(movie_avg_time_reg, by='movieId') %>%
+    left_join(user_avg_time_reg, by='userId') %>%
+    left_join(released_avg_time_reg, by='released') %>%
+    group_by(genres) %>%
+    summarize(b_g = sum(rating - mu - b_i - b_u - b_r)/(n()+l))
+  
+  # Predict ratings with regularized effects and time adjustment
+  predicted_ratings_time <-
+    test_set %>%
+    mutate(time_effect = predict.gam(fit, newdata = .) - mu) %>%
+    left_join(movie_avg_time_reg, by = "movieId") %>%
+    left_join(user_avg_time_reg, by = "userId") %>%
+    left_join(released_avg_time_reg, by = "released") %>%
+    left_join(genre_avg_reg, by = "genres") %>%
+    mutate(pred = mu + b_i + b_u + b_r + b_g + time_effect) %>%
+    pull(pred)
+  return(RMSE(predicted_ratings_time, test_set$rating))
+})
+```
+
+```{r regularization_loop_rmse, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, warning=FALSE, message=FALSE, fig.cap="RMSE in regularization loops"}
+# regularization_loop_rmse: Visualize RMSE values for different regularization parameters
+ggplot(data.frame(lambdas = lambdas, rmse = c(rmses, rmses_time), 
+                  group = rep(c("RMSE", "RMSE Time"), each = length(lambdas))),
+       aes(x = lambdas, y = rmse, color = group)) +
+  geom_point(size = 2) +  # Add points to the plot
+  geom_smooth(aes(linetype = group), method = "loess", se = FALSE, size = 0.7) +
+  scale_color_manual(values = c("RMSE" = "darkgreen", "RMSE Time" = "#5593ff")) +
+  scale_linetype_manual(values = c("RMSE" = "dashed", "RMSE Time" = "dashed")) +
+  labs(
+    x = "Lambda",
+    y = "RMSE Values",
+    caption = "Source: train data",
+    color = NULL,  # Remove legend title
+    linetype = NULL  # Remove legend title for line types
+  ) 
+```
+
+By this procedure, it could be found out that the time-adjusted model with regularization at a lambda value of 4.7 is best. Again, the differences are very small. Nevertheless, this will be used, and the values out of range will again be corrected. Then the RMSE table looks the following:
+
+```{r rmse_regularized, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_regularized: Calculate and display RMSE for the regularized, time-adjusted model
+# Find the optimal lambda value
+lambda <- lambdas[which.min(rmses_time)]
+
+# Regularize movie effects with time-adjusted ratings
+movie_avg_time_reg <- train_set_time_adjusted %>%
+  group_by(movieId) %>%
+  summarize(b_i = sum(rating_time_adjusted - mu)/(n()+lambda))
+
+# Regularize user effects with time-adjusted ratings
+user_avg_time_reg <- train_set_time_adjusted%>%
+  left_join(movie_avg_time_reg, by="movieId") %>%
+  group_by(userId) %>%
+  summarize(b_u = sum(rating_time_adjusted - b_i - mu)/(n()+lambda))
+
+# Regularize release year effects with time-adjusted ratings
+released_avg_time_reg <- train_set_time_adjusted%>%
+  left_join(movie_avg_time_reg, by='movieId') %>%
+  left_join(user_avg_time_reg, by='userId') %>%
+  group_by(released) %>%
+  summarize(b_r = sum(rating_time_adjusted - mu - b_i - b_u)/(n()+lambda))
+
+# Regularize genre effects (not time-adjusted)
+genre_avg_reg <- train_set%>%
+  left_join(movie_avg_time_reg, by='movieId') %>%
+  left_join(user_avg_time_reg, by='userId') %>%
+  left_join(released_avg_time_reg, by='released') %>%
+  group_by(genres) %>%
+  summarize(b_g = sum(rating - mu - b_i - b_u - b_r)/(n()+lambda))
+
+# Predict ratings with regularized effects and time adjustment
+predicted_ratings_time <-
+  test_set %>%
+  mutate(time_effect = predict.gam(fit, newdata = .) - mu) %>%
+  left_join(movie_avg_time_reg, by = "movieId") %>%
+  left_join(user_avg_time_reg, by = "userId") %>%
+  left_join(released_avg_time_reg, by = "released") %>%
+  left_join(genre_avg_reg, by = "genres") %>%
+  mutate(pred = mu + b_i + b_u + b_r + b_g + time_effect) %>%
+  pull(pred)
+
+# Correct values out of range [0.5, 5.0]
+predicted_ratings_time <- pmin(pmax(predicted_ratings_time, 0.5), 5.0)
+
+# Evaluate RMSE for the regularized, time-adjusted model
+suppressWarnings({
+model_time_reg_rmse_corr <- RMSE(predicted_ratings_time, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(Method="Regularized, Time-adjusted (Movie, User, Release year) + Genre + corr",  
+                                     RMSE = model_time_reg_rmse_corr ))
+})
+
+# Display the updated RMSE table
+rmse_results %>% knitr::kable()
+```
+
+## Final holdout test
+
+Now, the model is tested in the final holdout test dataset. The best model is the "Regularized, Time-adjusted (Movie, User, Release year) + Genre" model. The final holdout dataset was tested with that model with and without correction. Therefore, the release year and the week numbers need to be mutated in the dataset. Then, all the effects could be added. The results can be seen in the following table:
+
+```{r rmse_final_holdout, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
+# rmse_final_holdout: Evaluate the final model on the holdout set
+# Convert timestamp to date
+final_holdout_test$date <- as.Date(as.POSIXct(final_holdout_test$timestamp, origin = "1970-01-01"))
+
+# Extract release year from title
+final_holdout_test <- final_holdout_test %>%
+  mutate(released = str_extract(title, "\\((\\d{4})\\)") %>% 
+           str_remove_all("[()]") %>% 
+           as.numeric())
+
+# Add week number to the final holdout set
+final_holdout_test <- final_holdout_test %>% mutate(weekNumber = as.integer(difftime(date, min(date), units = "weeks")) + 1)
+
+# Predict ratings for the final holdout set
+predicted_ratings_final <- 
+  final_holdout_test %>% 
+  mutate(time_effect = predict.gam(fit, newdata = .) - mu) %>%
+  left_join(movie_avg_time_reg, by = "movieId") %>%
+  left_join(user_avg_time_reg, by = "userId") %>%
+  left_join(released_avg_time_reg, by = "released") %>%
+  left_join(genre_avg_reg, by = "genres") %>%
+  mutate(pred = mu + coalesce(b_i, 0) + b_u + b_r + b_g + time_effect) %>%
+  pull(pred)
+
+# Evaluate RMSE for the final model
+suppressWarnings({
+model_time_final_rmse <- RMSE(predicted_ratings_final, final_holdout_test$rating)
+rmse_results_final <- data.frame(Method = character(), RMSE = numeric())
+rmse_results_final <- bind_rows(rmse_results_final,
+                          data_frame(Method="Regularized, Time-adjusted (Movie, User, Release year) + Genre (final test)",  
+                                     RMSE = model_time_final_rmse ))
+})
+
+# Correct values out of range [0.5, 5.0]
+predicted_ratings_final <- pmin(pmax(predicted_ratings_final, 0.5), 5.0)
+
+# Evaluate RMSE for the corrected final model
+model_time_final_rmse_corr <- RMSE(predicted_ratings_final, final_holdout_test$rating)
+
+# Append the new RMSE result to the existing results dataframe
+suppressWarnings({
+rmse_results_final <- bind_rows(rmse_results_final,
+                          data_frame(Method="Regularized, Time-adjusted (Movie, User, Release year) + Genre + corr (final test)",  
+                                     RMSE = model_time_final_rmse_corr ))
+})
+
+# Display the updated RMSE table
+rmse_results_final %>% knitr::kable()
+```
+
+The model does not perform as well as in the test set out of the edx dataset, but the RMSE is still in an acceptable range.
+Figure 15 shows the outcome of the final holdout test from the predicted "Regularized, Time-adjusted (Movie, User, Release year) + Genre + corr" model as the absolute deviations of the prediction from the real ratings in the data. With that, the average deviation of the outcome is visualized for a better evaluation of the result.
+It can be seen that 71% of the predictions lie between +- 1 RMSE with its final value of 0.8645075.
+
+```{r final_dev_chart, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="Distribution of prediction deviations", warning=FALSE, message=FALSE}
+# final_dev_chart: Visualize the distribution of prediction deviations
+final_holdout_test %>%
+  mutate(deviation = predicted_ratings_final - rating) %>%
+  {  
+    deviation_data <- .
+    ggplot(deviation_data, aes(deviation)) +
+      geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+      geom_vline(xintercept = model_time_final_rmse_corr, linetype = "dashed", color = "red", size = 0.35) + 
+      geom_vline(xintercept = -model_time_final_rmse_corr, linetype = "dashed", color = "red", size = 0.35) + 
+      scale_y_continuous(labels = function(x) format(x, scientific = FALSE, big.mark = ",")) +
+      labs(
+        x = "Absolute deviation",
+        y = "Number of predictions",
+        caption = "Source: final_holdout_test data",
+        subtitle = paste0("RMSE: ", round(model_time_final_rmse_corr, 7), 
+                          " | Percentage within ±1 RMSE: ", 
+                          round(mean(abs(deviation_data$deviation) <= model_time_final_rmse_corr) * 100, 1), "%")
+      ) +
+      theme(plot.subtitle = element_text(size = rel(0.8)))
+  }
+```
+
+Both RMSE results (with and without correction) are below 0.86490, so the given target was reached.
+
+\newpage
+
+# Conclusion
+
+This project report described the development of a movie recommendation system based on the MovieLens 10M dataset. The main goal was to predict the user ratings based on various effects, like move-specific, user-specific, release year, genre, and time-dependent influences, as accurately as possible. The best model with the lowest RMSE used time adjustments, movie, user, release year, genre effects, and regularization and achieved an RMSE of 0.8634787 in the test data and an RMSE of 0.86451 in the final holdout test set. Thus, it met the predefined target of below 0.86490.
+
+However, some limitations were found during the analysis. The results are highly sensitive to both the site of train and test samples and the seed chosen for being reproducible. Changing these parameters could lead to different outcomes and could potentially have an impact on the descisions regarding which effects are to be chosen to be included in the model. Additionally, a time-of-rating effect was observed, the impact on the rating predictions was very small.
+
+Ratings are limited to increments of 0.5 within a range from 0.5 to 5. Therefore, alternative modeling techniques specifically for discrete ratings could potentially improve the accuracy. Matrix factorization methods, which are widely used in recommendation systems, could be more effective due to their ability to capture user-item interactions and thus, possibly provide better predictions [@koren_matrix_2009]. Also, applying cross-validation could help to better assess the model robustness by partitioning the dataset into multiple subsets and checking the performance of the model across these subsets. Although cross-validation was not used in this project because of computational constraints, it is recommended to be implemented in future analyses.
+
+\newpage
+
+# Usage of Artificial Intelligence {.unnumbered}
+
+
+\textbf{\large Perplexity AI – Latex and R Markdown syntax assistance}
+
+\begin{itemize}
+  \item \textbf{Website:} \url{https://www.perplexity.ai}
+  \item \textbf{Used in:} Latex header creation for R Markdown document, code chunk headers, mathematical formula syntax in Methods section
+  \item \textbf{Purpose:} Assistance in generating Latex headers for the R Markdown document structure, creating code chunk headers, and creating accurate mathematical syntax in the Methods section.
+\end{itemize}
+\vspace{15pt}
+
+\textbf{\large Perplexity AI – R code assistance}
+
+\begin{itemize}
+  \item \textbf{Website:} \url{https://www.perplexity.ai}
+  \item \textbf{Used in:} Methods and Results sections (ggplot syntax correction, GAM fit curve implementation for the time-corrected model)
+  \item \textbf{Purpose:} Syntax correction and debugging support for ggplot visualizations, assistance in implementing Generalized Additive Model (GAM) fit curves for time-adjusted models.
+\end{itemize}
+\vspace{15pt}
+
+\textbf{\large Perplexity AI – Content crosscheck and writing tips}
+
+\begin{itemize}
+  \item \textbf{Website:} \url{https://www.perplexity.ai}
+  \item \textbf{Used in:} Introduction and Conclusion sections
+  \item \textbf{Purpose:} Crosschecking content accuracy and logical structure; providing suggestions for improvements regarding clarity, precision, and scientific writing style.
+\end{itemize}
+\vspace{15pt}
+
+\textbf{\large Grammarly – Grammar and spell check}
+
+\begin{itemize}
+  \item \textbf{Website:} \url{https://www.grammarly.com}
+  \item \textbf{Used in:} Entire report
+  \item \textbf{Purpose:} Grammar and spelling correction.
+\end{itemize}
+\vspace{15pt}
+
+\textbf{\large Grok from X - R code commenting}
+
+\begin{itemize}
+  \item \textbf{Website:} \url{https://x.com}
+  \item \textbf{Used in:} R Code
+  \item \textbf{Purpose:} Assisting in generating code comments.
+\end{itemize}
+
+\newpage
+
+# References
