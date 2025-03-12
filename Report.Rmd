@@ -33,13 +33,16 @@ bibliography: references.bib
 
 ```{r setup, include=FALSE}
 # knitr global chunk options
+# Sets default figure dimensions, alignment, and positioning for knitr output
 knitr::opts_chunk$set(
-fig.width = 4.5,
-fig.height = 3,
-fig.align = 'center',
-fig.pos = "H"
+  fig.width = 4.5,
+  fig.height = 3,
+  fig.align = 'center',
+  fig.pos = "H"
 )
 
+# Custom kable function
+# Defines a reusable function to style tables with scaling and positioning
 my_kable <- function(x, caption = NULL) {
   knitr::kable(x, 
                format = "latex",
@@ -53,8 +56,13 @@ my_kable <- function(x, caption = NULL) {
     )
 }
 
+# Load and install ggplot2 library if needed
+if(!require(ggplot2)) install.packages("ggplot2")
+# Imports ggplot2 for data visualization
 library(ggplot2)
 
+# Set custom ggplot2 theme
+# Applies a minimal theme with adjusted font sizes and margins
 theme_set(
   theme_minimal() +
     theme(
@@ -77,8 +85,8 @@ theme_set(
 
 # Note: this process could take a couple of minutes
 
-if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
-if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(caret)) install.packages("caret")
 
 library(tidyverse)
 library(caret)
@@ -165,6 +173,17 @@ The report was created using R Markdown in RStudio including the use of the R pr
 In this section an overview over the edx dataset is made. In Table 1 and Table 2 the number of rows and the structure of the data in the first 10 rows can be seen.
 
 ```{r number_rows, eval=TRUE, cache=TRUE, include=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(tibble)) install.packages("tibble")
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(lubridate)) install.packages("lubridate")
+if(!require(ggthemes)) install.packages("ggthemes")
+if(!require(scales)) install.packages("scales")
+if(!require(knitr)) install.packages("knitr")
+if(!require(kableExtra)) install.packages("kableExtra")
+if(!require(dslabs)) install.packages("dslabs")
+if(!require(gam)) install.packages("gam")
+if(!require(gridExtra)) install.packages("gridExtra")
+
 library(tibble)
 library(tidyverse)
 library(lubridate)

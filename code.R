@@ -1,11 +1,59 @@
 ##########################################################
+# Setup
+##########################################################
+
+# knitr global chunk options
+# Sets default figure dimensions, alignment, and positioning for knitr output
+knitr::opts_chunk$set(
+  fig.width = 4.5,
+  fig.height = 3,
+  fig.align = 'center',
+  fig.pos = "H"
+)
+
+# Custom kable function
+# Defines a reusable function to style tables with scaling and positioning
+my_kable <- function(x, caption = NULL) {
+  knitr::kable(x, 
+               format = "latex",
+               booktabs = TRUE,
+               caption = caption,
+               linesep = "") %>%
+    kable_styling(
+      latex_options = c("scale_down", "hold_position"),
+      font_size = 9,
+      position = "center"
+    )
+}
+
+# Load and install ggplot2 library if needed
+if(!require(ggplot2)) install.packages("ggplot2")
+# Imports ggplot2 for data visualization
+library(ggplot2)
+
+# Set custom ggplot2 theme
+# Applies a minimal theme with adjusted font sizes and margins
+theme_set(
+  theme_minimal() +
+    theme(
+      plot.title = element_text(size = rel(0.9)),
+      axis.title = element_text(size = rel(0.8)),
+      axis.text = element_text(size = rel(0.7)),
+      legend.title = element_text(size = rel(0.8)),
+      plot.margin = unit(c(2,2,2,2), "mm"),
+      plot.caption = element_text(size = rel(0.6), hjust = 1)
+    )
+)
+
+
+##########################################################
 # Create edx and final_holdout_test sets 
 ##########################################################
 
 # Note: this process could take a couple of minutes
 
-if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
-if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(caret)) install.packages("caret")
 
 library(tidyverse)
 library(caret)
@@ -67,6 +115,17 @@ rm(dl, ratings, movies, test_index, temp, movielens, removed)
 ##########################################################
 # Data Exploration
 ##########################################################
+
+if(!require(tibble)) install.packages("tibble")
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(lubridate)) install.packages("lubridate")
+if(!require(ggthemes)) install.packages("ggthemes")
+if(!require(scales)) install.packages("scales")
+if(!require(knitr)) install.packages("knitr")
+if(!require(kableExtra)) install.packages("kableExtra")
+if(!require(dslabs)) install.packages("dslabs")
+if(!require(gam)) install.packages("gam")
+if(!require(gridExtra)) install.packages("gridExtra")
 
 library(tibble)
 library(tidyverse)
