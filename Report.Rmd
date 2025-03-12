@@ -236,7 +236,7 @@ ggplot(edx, aes(x = floor_date(as.Date(as.POSIXct(timestamp, origin = "1970-01-0
 
 ## Genre related observations
 
-Film genres are also included in the data.  In Figure 3 (left), there are the top 10 first named genres related to the specific movie and its rating.  So, these names and genres seem to be the most important in the dataset. In Figure 3 (right), the average rating per genre with the dot size representing the number of ratings can be seen.  There seems to be a bias per genre, as different genres tend to get higher ratings than others.  So, there seems to be a genre effect on the rating.  If this can be seen here, it is also likely that on a lower level, specific films also influence the average rating.
+Film genres are also included in the data.  In Figure 3 (left), there are the top 10 first named genres related to the specific movie and its rating.  So, these genres seem to be the most important in the dataset. In Figure 3 (right), the average rating per genre with the dot size representing the number of ratings can be seen.  There seems to be a bias per genre, as different genres tend to get higher ratings than others.  So, there seems to be a genre effect on the rating.  If this can be seen here, it is also likely that on a lower level, specific films also influence the average rating.
 
 ```{r genre_plots, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.width=6.6, fig.height=3, fig.cap="Top 10 film genres (left) and average rating per genre (right)", warning=FALSE, message=FALSE}
 # genre_plots: Creating two side-by-side plots for top 10 film genres and average ratings per genre
@@ -463,7 +463,7 @@ This approach allows to capture and correct temporal trends in ratings while the
 
 ## Range correction
 
-After applying time-adjustments a range correction can be performed. This makes sure that the predicted rating lie within the valid rating range (0.5 to 5). Any predictions outside of that range are adjusted to the nearest valid rating.
+After applying time-adjustments a range correction can be performed. This makes sure that the predicted ratings lie within the valid rating range (0.5 to 5). Any predictions outside of that range are adjusted to the nearest valid rating.
 
 ## Regularization
 
@@ -890,11 +890,11 @@ genre_avg_time %>%
 )
 ```
 
-During RMSE test of the time-adjusted models, it could be found out the time adjustment leads to better RMSE when applied to the movie, user, and release year effect. If also applied to genre effect, it is not beneficial for RMSE. So, for the following RMSE calculation and further calculations, the genre effect is not time-adjusted. The RMSE reduction for this is very small but nevertheless stays in the model in the rest of this project.
+During RMSE test of the time-adjusted models, it could be found out that the time-adjustment leads to better RMSE when applied to the movie, user, and release year effect. If also applied to genre effect, it is not beneficial for RMSE. So, for the following RMSE calculation and further calculations, the genre effect is not time-adjusted. The RMSE reduction for the "time-of-rating" effect is very small but nevertheless stays in the model in the rest of this project.
 
 The RMSE change can be seen in the table below.
 
-Remark: At the beginning of the calculations, a seed value of 1 is defined to get repeatable results. Changing this value results in different train and test sets and could possibly lead to an RMSE increase when adding the time adjustment.
+\textbf{Remark}: At the beginning of the calculations, a seed value of 1 is defined to get repeatable results. Changing this value would result in different train and test sets and could possibly lead to an RMSE increase when adding the time adjustment.
 
 ```{r rmse_time_adjusted, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
 # rmse_time_adjusted: Calculate and display RMSE for time-adjusted model with movie, user, release year, and genre effects
@@ -1051,11 +1051,11 @@ rmse_results %>% knitr::kable()
 In the following, regularization for penalizing large effect values is applied to all effects to prevent overfitting.
 
 \begin{enumerate}
-\item without the time adjusted model 
-\item with the time adjusted model 
+\item without the time-adjusted model 
+\item with the time-adjusted model 
 \end{enumerate}
 
-The lambda values are a variable, and a range between 4.2 and 5.0 in 0.1 steps is applied in a loop. With this procedure, the best value of lambda can be found, and it can also be seen if, after regularization, the time adjustment still leads to a better RMSE.
+The lambda value is a variable, and a range from 4.2 to 5.0 is selected and applied in steps of 0.1 in a loop. With this procedure, the best value of lambda can be found, and it can also be seen if, after regularization, the time-adjustment still leads to a better RMSE.
 
 ```{r regularization_prep, eval=TRUE, echo=FALSE, cache=TRUE, include=FALSE}
 # regularization_prep: Prepare regularization for movie, user, release year, and genre effects
@@ -1164,7 +1164,7 @@ ggplot(data.frame(lambdas = lambdas, rmse = c(rmses, rmses_time),
   ) 
 ```
 
-By this procedure, it could be found out that the time-adjusted model with regularization at a lambda value of 4.7 is best. Again, the differences are very small. Nevertheless, this will be used, and the values out of range will again be corrected. Then the RMSE table looks the following:
+It was found out that the time-adjusted model with regularization at a lambda value of 4.7 performs best. Again, the differences are very small. Nevertheless, this will be used, and the values out of range will again be corrected. Then the RMSE table looks the following:
 
 ```{r rmse_regularized, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
 # rmse_regularized: Calculate and display RMSE for the regularized, time-adjusted model
@@ -1225,7 +1225,7 @@ rmse_results %>% knitr::kable()
 
 ## Final holdout test
 
-Now, the model is tested in the final holdout test dataset. The best model is the "Regularized, Time-adjusted (Movie, User, Release year) + Genre" model. The final holdout dataset was tested with that model with and without correction. Therefore, the release year and the week numbers need to be mutated in the dataset. Then, all the effects could be added. The results can be seen in the following table:
+Now, the model is tested in the final holdout test dataset. The best model is the "Regularized, Time-adjusted (Movie, User, Release year) + Genre" model. The final holdout dataset was tested with that model with and without correction. Therefore, the release year and the week numbers need to be mutated in the dataset. Then, all the effects were added. The results can be seen in the following table:
 
 ```{r rmse_final_holdout, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE}
 # rmse_final_holdout: Evaluate the final model on the holdout set
@@ -1280,7 +1280,7 @@ rmse_results_final %>% knitr::kable()
 
 The model does not perform as well as in the test set out of the edx dataset, but the RMSE is still in an acceptable range.
 Figure 15 shows the outcome of the final holdout test from the predicted "Regularized, Time-adjusted (Movie, User, Release year) + Genre + corr" model as the absolute deviations of the prediction from the real ratings in the data. With that, the average deviation of the outcome is visualized for a better evaluation of the result.
-It can be seen that 71% of the predictions lie between +- 1 RMSE with its final value of 0.8645075.
+It can be seen that 71% of the predictions lie between $\pm$ 1 RMSE with its final value of 0.8645075.
 
 ```{r final_dev_chart, eval=TRUE, echo=FALSE, cache=TRUE, include=TRUE, fig.cap="Distribution of prediction deviations", warning=FALSE, message=FALSE}
 # final_dev_chart: Visualize the distribution of prediction deviations
@@ -1313,7 +1313,7 @@ Both RMSE results (with and without correction) are below 0.86490, so the given 
 
 This project report described the development of a movie recommendation system based on the MovieLens 10M dataset. The main goal was to predict the user ratings based on various effects, like move-specific, user-specific, release year, genre, and time-dependent influences, as accurately as possible. The best model with the lowest RMSE used time adjustments, movie, user, release year, genre effects, and regularization and achieved an RMSE of 0.8634787 in the test data and an RMSE of 0.86451 in the final holdout test set. Thus, it met the predefined target of below 0.86490.
 
-However, some limitations were found during the analysis. The results are highly sensitive to both the site of train and test samples and the seed chosen for being reproducible. Changing these parameters could lead to different outcomes and could potentially have an impact on the descisions regarding which effects are to be chosen to be included in the model. Additionally, a time-of-rating effect was observed, the impact on the rating predictions was very small.
+However, some limitations were found during the analysis. The results are highly sensitive to both the site of train and test samples and the seed chosen for being reproducible. Changing these parameters could lead to different outcomes and could potentially have an impact on the descisions regarding which effects are to be chosen to be included in the model. Additionally, a time-of-rating effect was observed, but the impact on the rating predictions was very small.
 
 Ratings are limited to increments of 0.5 within a range from 0.5 to 5. Therefore, alternative modeling techniques specifically for discrete ratings could potentially improve the accuracy. Matrix factorization methods, which are widely used in recommendation systems, could be more effective due to their ability to capture user-item interactions and thus, possibly provide better predictions [@koren_matrix_2009]. Also, applying cross-validation could help to better assess the model robustness by partitioning the dataset into multiple subsets and checking the performance of the model across these subsets. Although cross-validation was not used in this project because of computational constraints, it is recommended to be implemented in future analyses.
 
