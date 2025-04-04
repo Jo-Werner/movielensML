@@ -6,6 +6,8 @@ This project develops a movie recommendation system using the MovieLens 10M data
 
 -   **code.R:** Contains R code for data exploration, machine learning, and visualization.
 
+-   **references.bib:** Bibliography file containing all references used in the report.
+
 -   **Report.Rmd:** Includes R code and the full report with descriptions.
 
 -   **Report.pdf:** The compiled PDF report from Report.Rmd.
